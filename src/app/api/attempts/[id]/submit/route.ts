@@ -17,6 +17,7 @@ export async function POST(request: Request, { params }: Params) {
       userId: user.id,
       attemptId: id,
       answers: body.answers,
+      mode: body.mode,
     });
 
     return jsonOk(result);

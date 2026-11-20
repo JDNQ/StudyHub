@@ -1,155 +1,267 @@
-import { describe, it, expect } from "vitest";
-
 /**
- * Unit tests for the submitAttempt scoring logic.
- *
- * We test the logic directly by extracting/replicating the scoring calculation
- * since submitAttempt has Supabase dependencies. The scoring behaviour change:
- *   - Full attempt (all questions submitted): denominator = all questions
- *   - Partial/retry attempt (subset submitted): denominator = submitted count
+ * Tests for submitAttempt — calls the REAL function from service.ts
+ * with a Supabase client mocked at the boundary (vi.fn stubs).
  */
+import { describe, it, expect, vi } from "vitest";
+import { submitAttempt } from "../service";
+import { ApiError } from "@/lib/api";
 
-// ---- Pure scoring logic extracted from submitAttempt for unit testing ----
+// ---- Types ----
+type Row = Record<string, unknown>;
+type Resolver = (v: { data: unknown; error: unknown }) => void;
 
-type Answer = { questionId: string; selectedOptionId: string };
+// ---- Fixtures ----
 
-function computeScore(
-  questionIds: string[],
-  correctOptionByQuestion: Map<string, string>, // questionId → correct optionId
-  answers: Answer[],
-): { score: number; correctCount: number; total: number; isPartialAttempt: boolean } {
-  const answerMap = new Map(answers.map((a) => [a.questionId, a.selectedOptionId]));
-  const submittedQuestionIds = new Set(answers.map((a) => a.questionId));
-  const isPartialAttempt =
-    submittedQuestionIds.size > 0 &&
-    submittedQuestionIds.size < questionIds.length;
+const ATTEMPT_ID = "aaa-aaa-aaa";
+const QUIZ_ID    = "quiz-id";
+const USER_ID    = "user-id";
 
-  let correctCount = 0;
-  for (const qId of questionIds) {
-    const selected = answerMap.get(qId) ?? null;
-    const correctId = correctOptionByQuestion.get(qId) ?? null;
-    const isCorrect = Boolean(selected && correctId && selected === correctId);
-    if (isCorrect && submittedQuestionIds.has(qId)) correctCount += 1;
-  }
+const baseAttempt: Row = {
+  id: ATTEMPT_ID,
+  quiz_id: QUIZ_ID,
+  user_id: USER_ID,
+  submitted_at: null,
+  started_at: new Date(Date.now() - 60_000).toISOString(),
+  total_questions: 10,
+};
 
-  const total = isPartialAttempt ? submittedQuestionIds.size : questionIds.length;
-  const score = total > 0 ? Number(((correctCount / total) * 100).toFixed(2)) : 0;
-  return { score, correctCount, total, isPartialAttempt };
+function makeQuestion(id: string, index: number): Row {
+  return { id, quiz_id: QUIZ_ID, question_text: `Q${index}`, order_index: index };
 }
 
-// ---- Tests ----
+function makeOptions(questionId: string, correctKey = "A"): Row[] {
+  return ["A", "B", "C", "D"].map((key) => ({
+    id: `opt-${questionId}-${key}`,
+    question_id: questionId,
+    option_key: key,
+    is_correct: key === correctKey,
+  }));
+}
 
-describe("submitAttempt scoring logic", () => {
-  const Q = ["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9", "q10"];
-  const correctOptions: Map<string, string> = new Map([
-    ["q1", "opt-a1"], ["q2", "opt-a2"], ["q3", "opt-a3"], ["q4", "opt-a4"],
-    ["q5", "opt-a5"], ["q6", "opt-a6"], ["q7", "opt-a7"], ["q8", "opt-a8"],
-    ["q9", "opt-a9"], ["q10", "opt-a10"],
-  ]);
+function buildFixtures() {
+  const questions = Array.from({ length: 10 }, (_, i) => makeQuestion(`q${i + 1}`, i));
+  const options   = questions.flatMap((q) => makeOptions(q.id, "A"));
+  return { questions, options };
+}
 
-  describe("full attempt (all 10 questions submitted)", () => {
-    it("7/10 correct = 70%", () => {
-      const answers: Answer[] = Q.map((qId, i) => ({
-        questionId: qId,
-        // First 7 correct, last 3 wrong
-        selectedOptionId: i < 7 ? `opt-a${i + 1}` : "opt-wrong",
-      }));
-      const { score, correctCount, total, isPartialAttempt } = computeScore(
-        Q, correctOptions, answers,
-      );
-      expect(isPartialAttempt).toBe(false);
-      expect(total).toBe(10);
-      expect(correctCount).toBe(7);
-      expect(score).toBe(70);
+function correctAnswers(questions: Row[]) {
+  return questions.map((q) => ({
+    questionId: q.id as string,
+    selectedOptionId: `opt-${q.id}-A`,
+  }));
+}
+
+// ---- Supabase mock factory ----
+// submitAttempt calls Supabase in this order:
+//   1. quiz_attempts → select/eq/eq/maybeSingle (load attempt)
+//   2. questions → select/eq (load questions)       — awaited directly
+//   3. answer_options → select/in (load options)    — awaited directly
+//   4. user_answers → upsert (save answers)
+//   5. quiz_attempts → update/eq/select/single (update score)
+// Then calls getAttemptResult which re-fetches:
+//   6. quiz_attempts → select/eq/eq/maybeSingle
+//   7. questions → select/eq/order
+//   8. answer_options → select/in
+//   9. user_answers → select/eq
+
+function buildSupabase(opts: {
+  attempt: Row | null;
+  questions: Row[];
+  options: Row[];
+  onUpdate?: (data: Row) => void;
+}) {
+  // Track call count for quiz_attempts to serve load vs result re-fetch
+  let attemptCallCount = 0;
+  const submittedAttempt = opts.attempt
+    ? { ...opts.attempt, submitted_at: new Date().toISOString(), score: 100 }
+    : null;
+
+  return {
+    from: vi.fn((table: string) => {
+      // ── quiz_attempts ──────────────────────────────────────────────
+      if (table === "quiz_attempts") {
+        attemptCallCount += 1;
+        const isFirst = attemptCallCount === 1;
+
+        if (isFirst && opts.attempt && (opts.attempt.submitted_at)) {
+          // Guard-rail: attempt already submitted
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: opts.attempt, error: null }),
+          };
+        }
+
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: isFirst ? opts.attempt : submittedAttempt,
+            error: null,
+          }),
+          update: vi.fn((data: Row) => {
+            opts.onUpdate?.(data);
+            return {
+              eq: vi.fn().mockReturnThis(),
+              select: vi.fn().mockReturnThis(),
+              single: vi.fn().mockResolvedValue({
+                data: { ...opts.attempt, ...data, submitted_at: new Date().toISOString() },
+                error: null,
+              }),
+            };
+          }),
+        };
+      }
+
+      // ── questions ──────────────────────────────────────────────────
+      if (table === "questions") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockReturnThis(),
+          then: (resolve: Resolver) =>
+            Promise.resolve({ data: opts.questions, error: null }).then(resolve),
+        };
+      }
+
+      // ── answer_options ─────────────────────────────────────────────
+      if (table === "answer_options") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          in: vi.fn().mockReturnThis(),
+          then: (resolve: Resolver) =>
+            Promise.resolve({ data: opts.options, error: null }).then(resolve),
+        };
+      }
+
+      // ── user_answers ───────────────────────────────────────────────
+      if (table === "user_answers") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          upsert: vi.fn().mockResolvedValue({ error: null }),
+          then: (resolve: Resolver) =>
+            Promise.resolve({ data: [], error: null }).then(resolve),
+        };
+      }
+
+      return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis() };
+    }),
+  };
+}
+
+// ============================================================
+// Tests
+// ============================================================
+
+describe("submitAttempt — real function, mocked Supabase", () => {
+
+  describe("mode: full — skipped questions count as wrong (denominator = all questions)", () => {
+    it("7/10 answered correctly, 3 skipped → 70%, not 100%", async () => {
+      const { questions, options } = buildFixtures();
+      let captured: Row | null = null;
+
+      const supabase = buildSupabase({
+        attempt: baseAttempt,
+        questions,
+        options,
+        onUpdate: (d) => { captured = d; },
+      });
+
+      const answers = correctAnswers(questions.slice(0, 7)); // only 7
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await submitAttempt({ supabase: supabase as any, userId: USER_ID, attemptId: ATTEMPT_ID, answers, mode: "full" });
+
+      expect(captured).not.toBeNull();
+      expect((captured as Row).correct_count).toBe(7);
+      expect((captured as Row).total_questions).toBe(10);
+      expect((captured as Row).score).toBe(70);
     });
 
-    it("0/10 correct = 0%", () => {
-      const answers: Answer[] = Q.map((qId) => ({
-        questionId: qId,
-        selectedOptionId: "opt-wrong",
-      }));
-      const { score, correctCount } = computeScore(Q, correctOptions, answers);
-      expect(correctCount).toBe(0);
-      expect(score).toBe(0);
-    });
+    it("10/10 answered correctly → 100%", async () => {
+      const { questions, options } = buildFixtures();
+      let captured: Row | null = null;
 
-    it("10/10 correct = 100%", () => {
-      const answers: Answer[] = Q.map((qId, i) => ({
-        questionId: qId,
-        selectedOptionId: `opt-a${i + 1}`,
-      }));
-      const { score, correctCount } = computeScore(Q, correctOptions, answers);
-      expect(correctCount).toBe(10);
-      expect(score).toBe(100);
+      const supabase = buildSupabase({ attempt: baseAttempt, questions, options, onUpdate: (d) => { captured = d; } });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await submitAttempt({ supabase: supabase as any, userId: USER_ID, attemptId: ATTEMPT_ID, answers: correctAnswers(questions), mode: "full" });
+
+      expect((captured as Row | null)?.score).toBe(100);
+      expect((captured as Row | null)?.total_questions).toBe(10);
     });
   });
 
-  describe("partial / retry attempt (3 wrong questions retried)", () => {
-    // Scenario: user had 10-question quiz, got q8/q9/q10 wrong.
-    // They retry only those 3 questions and get all correct.
-    // Expected: 3/3 = 100%, NOT 3/10 = 30%.
+  describe("mode: retry — denominator = submitted count only", () => {
+    it("3/10 questions retried, all correct → 100% (not 30%)", async () => {
+      const { questions, options } = buildFixtures();
+      let captured: Row | null = null;
 
-    it("retrying 3 wrong questions, all correct → 100%", () => {
-      const retryAnswers: Answer[] = [
-        { questionId: "q8", selectedOptionId: "opt-a8" },
-        { questionId: "q9", selectedOptionId: "opt-a9" },
-        { questionId: "q10", selectedOptionId: "opt-a10" },
-      ];
-      const { score, correctCount, total, isPartialAttempt } = computeScore(
-        Q, correctOptions, retryAnswers,
-      );
-      expect(isPartialAttempt).toBe(true);
-      expect(total).toBe(3);       // denominator = submitted count
-      expect(correctCount).toBe(3);
-      expect(score).toBe(100);     // NOT 30%
+      const supabase = buildSupabase({ attempt: baseAttempt, questions, options, onUpdate: (d) => { captured = d; } });
+
+      const retryAnswers = correctAnswers(questions.slice(7, 10)); // last 3
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await submitAttempt({ supabase: supabase as any, userId: USER_ID, attemptId: ATTEMPT_ID, answers: retryAnswers, mode: "retry" });
+
+      expect((captured as Row | null)?.correct_count).toBe(3);
+      expect((captured as Row | null)?.total_questions).toBe(3); // ← 3, not 10
+      expect((captured as Row | null)?.score).toBe(100);         // ← 100%, not 30%
     });
 
-    it("retrying 3 wrong questions, 2 correct → 66.67%", () => {
-      const retryAnswers: Answer[] = [
-        { questionId: "q8", selectedOptionId: "opt-a8" },   // correct
-        { questionId: "q9", selectedOptionId: "opt-wrong" }, // wrong
-        { questionId: "q10", selectedOptionId: "opt-a10" },  // correct
-      ];
-      const { score, correctCount, total } = computeScore(
-        Q, correctOptions, retryAnswers,
-      );
-      expect(total).toBe(3);
-      expect(correctCount).toBe(2);
-      expect(score).toBe(66.67);
-    });
+    it("3 retried, 2 correct → 66.67%", async () => {
+      const { questions, options } = buildFixtures();
+      let captured: Row | null = null;
 
-    it("retrying 1 question correctly → 100%", () => {
-      const retryAnswers: Answer[] = [
-        { questionId: "q5", selectedOptionId: "opt-a5" },
-      ];
-      const { score, total } = computeScore(Q, correctOptions, retryAnswers);
-      expect(total).toBe(1);
-      expect(score).toBe(100);
-    });
+      const supabase = buildSupabase({ attempt: baseAttempt, questions, options, onUpdate: (d) => { captured = d; } });
 
-    it("retrying all 10 questions is NOT considered partial", () => {
-      const retryAnswers: Answer[] = Q.map((qId, i) => ({
-        questionId: qId,
-        selectedOptionId: `opt-a${i + 1}`,
-      }));
-      const { isPartialAttempt, total } = computeScore(Q, correctOptions, retryAnswers);
-      expect(isPartialAttempt).toBe(false);
-      expect(total).toBe(10);
+      const retryAnswers = [
+        { questionId: questions[7].id as string, selectedOptionId: `opt-${questions[7].id}-A` }, // ✓
+        { questionId: questions[8].id as string, selectedOptionId: `opt-${questions[8].id}-B` }, // ✗
+        { questionId: questions[9].id as string, selectedOptionId: `opt-${questions[9].id}-A` }, // ✓
+      ];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await submitAttempt({ supabase: supabase as any, userId: USER_ID, attemptId: ATTEMPT_ID, answers: retryAnswers, mode: "retry" });
+
+      expect((captured as Row | null)?.correct_count).toBe(2);
+      expect((captured as Row | null)?.total_questions).toBe(3);
+      expect((captured as Row | null)?.score).toBe(66.67);
     });
   });
 
-  describe("edge cases", () => {
-    it("empty answers with no questions → score 0", () => {
-      const { score } = computeScore([], new Map(), []);
-      expect(score).toBe(0);
+  describe("guard rails", () => {
+    it("throws ApiError ALREADY_SUBMITTED when attempt.submitted_at is set", async () => {
+      const { questions, options } = buildFixtures();
+      const alreadySubmitted = { ...baseAttempt, submitted_at: "2026-01-01T00:00:00Z" };
+
+      const supabase = buildSupabase({ attempt: alreadySubmitted, questions, options });
+
+      await expect(
+        submitAttempt({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          supabase: supabase as any,
+          userId: USER_ID,
+          attemptId: ATTEMPT_ID,
+          answers: correctAnswers(questions.slice(0, 1)),
+          mode: "full",
+        }),
+      ).rejects.toSatisfy((e: unknown) => e instanceof ApiError && e.code === "ALREADY_SUBMITTED");
     });
 
-    it("submitted question not in quiz question list → not counted", () => {
-      // Submitting a question ID that doesn't exist in the quiz
-      const rogue: Answer[] = [{ questionId: "fake-q", selectedOptionId: "opt-a1" }];
-      const { correctCount } = computeScore(Q, correctOptions, rogue);
-      // fake-q is not in correctOptions so isCorrect = false
-      expect(correctCount).toBe(0);
+    it("throws ApiError ATTEMPT_NOT_FOUND when attempt is null", async () => {
+      const { questions, options } = buildFixtures();
+
+      const supabase = buildSupabase({ attempt: null, questions, options });
+
+      await expect(
+        submitAttempt({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          supabase: supabase as any,
+          userId: USER_ID,
+          attemptId: ATTEMPT_ID,
+          answers: correctAnswers(questions.slice(0, 1)),
+          mode: "full",
+        }),
+      ).rejects.toSatisfy((e: unknown) => e instanceof ApiError && e.code === "ATTEMPT_NOT_FOUND");
     });
   });
 });

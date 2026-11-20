@@ -81,7 +81,7 @@ export function QuizPlayer({ quiz, questions, retryMode = false }: Props) {
           selectedOptionId,
         }),
       );
-      await submitAttempt(id, payload);
+      await submitAttempt(id, payload, retryMode ? "retry" : "full");
       router.push(`/attempts/${id}`);
       router.refresh();
     } catch (err) {

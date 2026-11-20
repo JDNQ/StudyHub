@@ -322,8 +322,9 @@ export async function submitAttempt(params: {
   userId: string;
   attemptId: string;
   answers: Array<{ questionId: string; selectedOptionId: string }>;
+  mode?: "full" | "retry";
 }) {
-  const { supabase, userId, attemptId, answers } = params;
+  const { supabase, userId, attemptId, answers, mode = "full" } = params;
 
   const { data: attempt, error: attemptError } = await supabase
     .from("quiz_attempts")
@@ -373,17 +374,15 @@ export async function submitAttempt(params: {
     validOptionsByQuestion.set(opt.question_id, set);
   }
 
-  // Only score questions that the user actually submitted answers for.
-  // This is critical for "retry wrong answers" mode: if a 10-question quiz
-  // has 3 wrong questions retried, scoring all 10 questions would give 30%
-  // even when all 3 retried questions are correct.
-  // We score only the submitted question IDs; unanswered questions in the
-  // original quiz are recorded with selected_option_id = null, is_correct = false
-  // but are NOT counted in the denominator.
+  // In "retry" mode the client explicitly tells us only a subset of questions
+  // was presented. We score only those questions and use their count as the
+  // denominator so that "retried 3, got 3 right" = 100%, not 30%.
+  //
+  // In "full" mode (default) the denominator is the total quiz question count.
+  // We do NOT infer mode from the number of answers submitted — that caused the
+  // bug where doing 7/10 questions in a full attempt and skipping 3 gave 100%.
   const submittedQuestionIds = new Set(answers.map((a) => a.questionId));
-  const isPartialAttempt =
-    submittedQuestionIds.size > 0 &&
-    submittedQuestionIds.size < questionList.length;
+  const isRetry = mode === "retry";
 
   let correctCount = 0;
 
@@ -395,8 +394,8 @@ export async function submitAttempt(params: {
       submittedId && validOptions?.has(submittedId) ? submittedId : null;
     const correctId = correctByQuestion.get(q.id) ?? null;
     const isCorrect = Boolean(selected && correctId && selected === correctId);
-    // Only count towards the score if this question was submitted
-    if (isCorrect && submittedQuestionIds.has(q.id)) correctCount += 1;
+    // In retry mode only count questions that were actually submitted
+    if (isCorrect && (!isRetry || submittedQuestionIds.has(q.id))) correctCount += 1;
     return {
       attempt_id: attemptId,
       question_id: q.id,
@@ -413,8 +412,9 @@ export async function submitAttempt(params: {
     throw new ApiError(500, "SAVE_ANSWERS_FAILED", upsertError.message);
   }
 
-  // Denominator = number of questions actually submitted (partial retry) or all questions
-  const total = isPartialAttempt
+  // "retry" mode: denominator = only submitted questions.
+  // "full" mode: denominator = all questions in quiz (skipped = wrong).
+  const total = isRetry
     ? submittedQuestionIds.size
     : questionList.length || attempt.total_questions;
   const score = total > 0 ? Number(((correctCount / total) * 100).toFixed(2)) : 0;

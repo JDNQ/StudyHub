@@ -17,4 +17,10 @@ export const submitAttemptBodySchema = z.object({
       }),
     )
     .min(1),
+  /**
+   * "full"  = làm toàn bộ đề (default) — mẫu số là tổng câu của quiz.
+   * "retry" = chỉ luyện lại một số câu sai — mẫu số là số câu gửi lên.
+   * Client phải gửi cờ này tường minh; server không tự đoán từ số câu.
+   */
+  mode: z.enum(["full", "retry"]).default("full"),
 });

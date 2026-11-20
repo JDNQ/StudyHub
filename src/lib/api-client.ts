@@ -124,11 +124,12 @@ export async function startAttempt(quizId: string) {
 export async function submitAttempt(
   attemptId: string,
   answers: Array<{ questionId: string; selectedOptionId: string }>,
+  mode: "full" | "retry" = "full",
 ) {
   const res = await apiFetch(`/api/attempts/${attemptId}/submit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answers }),
+    body: JSON.stringify({ answers, mode }),
   });
   return parseJson<{ attempt: QuizAttempt; questions: ResultQuestion[] }>(res);
 }
