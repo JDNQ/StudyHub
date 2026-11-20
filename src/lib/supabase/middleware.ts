@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login"];
+// Paths accessible without authentication
+const PUBLIC_PATHS = ["/login", "/landing", "/privacy", "/terms"];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some(
@@ -46,14 +47,22 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // Unauthenticated users: redirect to landing page (not login) unless already on public path
   if (!user && !isPublicPath(pathname) && !isApiPath(pathname)) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/login";
-    redirectUrl.searchParams.set("next", pathname);
+    // Root path → landing page; other paths → login with next param
+    if (pathname === "/") {
+      redirectUrl.pathname = "/landing";
+      redirectUrl.search = "";
+    } else {
+      redirectUrl.pathname = "/login";
+      redirectUrl.searchParams.set("next", pathname);
+    }
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (user && pathname === "/login") {
+  // Authenticated users on login or landing page → go to app
+  if (user && (pathname === "/login" || pathname === "/landing")) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/";
     redirectUrl.search = "";

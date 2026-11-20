@@ -4,6 +4,7 @@ import { formatDuration } from "@/lib/api-client";
 import { requireUser } from "@/lib/auth";
 import { getAttemptResult } from "@/lib/quizzes/service";
 import { uuidSchema } from "@/lib/validation";
+import { RetryWrongButton } from "@/components/retry-wrong-button";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -19,9 +20,13 @@ export default async function AttemptResultPage({ params }: Props) {
   const total = attempt.total_questions;
   const pct = attempt.score ?? 0;
 
+  const wrongQuestionIds = questions
+    .filter((q) => q.is_correct !== true)
+    .map((q) => q.id);
+
   return (
-    <div className="flex flex-col gap-space-xl">
-      <div className="flex flex-wrap items-center gap-space-sm">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center gap-3">
         <Link
           href="/attempts"
           className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container-low text-on-surface-variant hover:bg-surface-container"
@@ -31,28 +36,28 @@ export default async function AttemptResultPage({ params }: Props) {
         <span className="text-sm text-outline">Kết quả bài làm</span>
       </div>
 
-      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-surface-container-lowest via-surface-container-low to-surface-container-high p-space-xl shadow-md">
+      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-surface-container-lowest via-surface-container-low to-surface-container-high p-5 shadow-md sm:p-8">
         <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <div className="relative z-10 grid grid-cols-1 items-center gap-space-xl lg:grid-cols-12">
+        <div className="relative z-10 grid grid-cols-1 items-center gap-6 lg:grid-cols-12">
           <div className="lg:col-span-5">
-            <div className="mb-space-sm inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-700">
+            <div className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-700">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
               KẾT QUẢ KIỂM TRA
             </div>
-            <div className="flex items-baseline gap-space-xs">
+            <div className="flex items-baseline gap-2">
               <span className="font-display text-5xl font-extrabold tracking-tight text-primary">
                 {score10}
               </span>
               <span className="text-2xl text-outline">/ 10</span>
             </div>
-            <p className="mt-space-xs text-base font-bold text-on-surface">
+            <p className="mt-2 text-base font-bold text-on-surface">
               Chính xác {correct} / {total} câu ({pct}%)
             </p>
             <p className="mt-1 text-sm text-on-surface-variant">
               Thời gian: {formatDuration(attempt.duration_seconds)}
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-space-sm rounded-xl bg-surface-container-lowest/80 p-space-md shadow-sm backdrop-blur-md lg:col-span-7">
+          <div className="grid grid-cols-3 gap-3 rounded-xl bg-surface-container-lowest/80 p-4 shadow-sm backdrop-blur-md lg:col-span-7">
             <Kpi
               icon="timer"
               value={formatDuration(attempt.duration_seconds)}
@@ -66,17 +71,23 @@ export default async function AttemptResultPage({ params }: Props) {
             />
           </div>
         </div>
-        <div className="relative z-10 mt-space-lg flex flex-wrap gap-space-sm">
+        <div className="relative z-10 mt-5 flex flex-wrap gap-3">
           <Link
             href={`/quizzes/${attempt.quiz_id}/play`}
-            className="inline-flex items-center gap-space-xs rounded-lg bg-primary px-space-md py-2.5 text-sm font-semibold text-on-primary shadow-sm"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary shadow-sm"
           >
             <Icon name="replay" className="text-[18px]" />
-            Làm lại đề này
+            Làm lại toàn bộ
           </Link>
+          {wrongQuestionIds.length > 0 && (
+            <RetryWrongButton
+              quizId={attempt.quiz_id}
+              wrongQuestionIds={wrongQuestionIds}
+            />
+          )}
           <Link
             href="/quizzes"
-            className="inline-flex items-center gap-space-xs rounded-lg bg-surface-container px-space-md py-2 text-sm font-medium text-on-surface"
+            className="inline-flex items-center gap-2 rounded-lg bg-surface-container px-4 py-2 text-sm font-medium text-on-surface"
           >
             Phòng thi
           </Link>
@@ -84,10 +95,10 @@ export default async function AttemptResultPage({ params }: Props) {
       </section>
 
       <section>
-        <h2 className="mb-space-md font-headline text-xl font-bold">
+        <h2 className="mb-4 font-headline text-xl font-bold">
           Chi tiết từng câu &amp; giải thích AI
         </h2>
-        <ul className="flex flex-col gap-space-md">
+        <ul className="flex flex-col gap-4">
           {questions.map((q, i) => {
             const correctOpt = q.options.find((o) => o.is_correct);
             const selected = q.options.find((o) => o.id === q.selected_option_id);
@@ -95,9 +106,9 @@ export default async function AttemptResultPage({ params }: Props) {
             return (
               <li
                 key={q.id}
-                className="rounded-xl bg-surface-container-lowest p-space-lg shadow-sm"
+                className="rounded-xl bg-surface-container-lowest p-5 shadow-sm"
               >
-                <div className="mb-space-sm flex flex-wrap items-center gap-2">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-surface-container px-2.5 py-1 text-sm font-bold">
                     Câu {i + 1}
                   </span>
@@ -111,10 +122,10 @@ export default async function AttemptResultPage({ params }: Props) {
                     {ok ? "Đúng" : "Sai / chưa chọn"}
                   </span>
                 </div>
-                <p className="mb-space-md font-semibold text-on-surface">
+                <p className="mb-4 font-semibold text-on-surface">
                   {q.question_text}
                 </p>
-                <div className="mb-space-md grid gap-2 sm:grid-cols-2">
+                <div className="mb-4 grid gap-2 sm:grid-cols-2">
                   <p className="text-sm text-on-surface-variant">
                     Bạn chọn:{" "}
                     <strong className="text-on-surface">
@@ -133,7 +144,7 @@ export default async function AttemptResultPage({ params }: Props) {
                   </p>
                 </div>
                 {q.explanation ? (
-                  <div className="rounded-lg bg-surface-container-low p-space-md">
+                  <div className="rounded-lg bg-surface-container-low p-4">
                     <div className="mb-1 flex items-center gap-1 text-xs font-semibold text-tertiary">
                       <Icon name="psychology" className="text-[16px]" />
                       Giải thích
@@ -165,7 +176,7 @@ function Kpi({
   label: string;
 }) {
   return (
-    <div className="flex flex-col items-center p-space-xs text-center">
+    <div className="flex flex-col items-center p-2 text-center">
       <Icon name={icon} className="mb-1 text-[24px] text-primary" />
       <span className="font-mono text-sm font-bold text-on-surface">{value}</span>
       <span className="mt-0.5 text-xs text-outline">{label}</span>

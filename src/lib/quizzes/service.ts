@@ -143,8 +143,44 @@ export async function generateAndSaveQuiz(params: {
     );
   }
 
+  const MAX_CHARS = 24_000;
+  let documentText: string;
+
+  if (doc.extracted_text.length <= MAX_CHARS) {
+    // Short document: use full text directly
+    documentText = doc.extracted_text;
+  } else {
+    // Long document: assemble from chunks up to MAX_CHARS for better coverage
+    const { data: chunks, error: chunkError } = await supabase
+      .from("document_chunks")
+      .select("chunk_index, content")
+      .eq("document_id", documentId)
+      .order("chunk_index", { ascending: true });
+
+    if (chunkError || !chunks || chunks.length === 0) {
+      // Fallback: use first MAX_CHARS of extracted_text
+      documentText = doc.extracted_text.slice(0, MAX_CHARS);
+    } else {
+      // Build text by concatenating chunks until we reach MAX_CHARS
+      const parts: string[] = [];
+      let total = 0;
+      for (const chunk of chunks) {
+        if (total + chunk.content.length > MAX_CHARS) {
+          const remaining = MAX_CHARS - total;
+          if (remaining > 200) {
+            parts.push(chunk.content.slice(0, remaining));
+          }
+          break;
+        }
+        parts.push(chunk.content);
+        total += chunk.content.length;
+      }
+      documentText = parts.join("\n\n");
+    }
+  }
+
   const input: QuizGenerateInput = {
-    documentText: doc.extracted_text,
+    documentText,
     questionCount,
     difficulty,
     documentTitle: doc.title,
@@ -328,10 +364,23 @@ export async function submitAttempt(params: {
   );
 
   const answerMap = new Map(answers.map((a) => [a.questionId, a.selectedOptionId]));
+
+  // Build a set of valid option IDs per question to prevent spoofed option IDs
+  const validOptionsByQuestion = new Map<string, Set<string>>();
+  for (const opt of optionList) {
+    const set = validOptionsByQuestion.get(opt.question_id) ?? new Set<string>();
+    set.add(opt.id);
+    validOptionsByQuestion.set(opt.question_id, set);
+  }
+
   let correctCount = 0;
 
   const rows = questionList.map((q) => {
-    const selected = answerMap.get(q.id) ?? null;
+    const submittedId = answerMap.get(q.id) ?? null;
+    // Only accept selectedOptionId if it actually belongs to this question
+    const validOptions = validOptionsByQuestion.get(q.id);
+    const selected =
+      submittedId && validOptions?.has(submittedId) ? submittedId : null;
     const correctId = correctByQuestion.get(q.id) ?? null;
     const isCorrect = Boolean(selected && correctId && selected === correctId);
     if (isCorrect) correctCount += 1;

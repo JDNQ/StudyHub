@@ -87,7 +87,13 @@ export async function deleteDocument(id: string) {
 
 export async function listQuizzes() {
   const res = await apiFetch("/api/quizzes");
-  return parseJson<{ quizzes: Quiz[] }>(res);
+  const data = await parseJson<{ quizzes: Quiz[] }>(res);
+  return data.quizzes;
+}
+
+export async function deleteQuiz(id: string) {
+  const res = await apiFetch(`/api/quizzes/${id}`, { method: "DELETE" });
+  return parseJson<{ id: string; deleted: boolean }>(res);
 }
 
 export async function generateQuiz(body: {

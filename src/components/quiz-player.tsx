@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icon";
 import {
@@ -14,9 +14,10 @@ import type { Quiz } from "@/lib/types/database";
 type Props = {
   quiz: Quiz;
   questions: PublicQuestion[];
+  retryMode?: boolean;
 };
 
-export function QuizPlayer({ quiz, questions }: Props) {
+export function QuizPlayer({ quiz, questions, retryMode = false }: Props) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -26,17 +27,36 @@ export function QuizPlayer({ quiz, questions }: Props) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const current = questions[index];
+  // Retry mode: filter questions to only wrong ones (stored in sessionStorage)
+  const activeQuestions = useMemo<PublicQuestion[]>(() => {
+    if (!retryMode) return questions;
+    if (typeof window === "undefined") return questions;
+    try {
+      const stored = sessionStorage.getItem(`retry_wrong_${quiz.id}`);
+      if (!stored) return questions;
+      const wrongIds = JSON.parse(stored) as string[];
+      const filtered = questions.filter((q) => wrongIds.includes(q.id));
+      return filtered.length > 0 ? filtered : questions;
+    } catch {
+      return questions;
+    }
+  }, [questions, quiz.id, retryMode]);
+
+  // Clear sessionStorage after reading in retry mode
+  useEffect(() => {
+    if (retryMode && typeof window !== "undefined") {
+      sessionStorage.removeItem(`retry_wrong_${quiz.id}`);
+    }
+  }, [retryMode, quiz.id]);
+
+  const current = activeQuestions[index];
   const answeredCount = Object.keys(answers).length;
   const progress =
-    questions.length > 0
-      ? Math.round((answeredCount / questions.length) * 100)
+    activeQuestions.length > 0
+      ? Math.round((answeredCount / activeQuestions.length) * 100)
       : 0;
 
-  const optionKeys = useMemo(
-    () => ["A", "B", "C", "D", "E", "F"],
-    [],
-  );
+  const optionKeys = useMemo(() => ["A", "B", "C", "D", "E", "F"], []);
 
   async function ensureAttempt() {
     if (attemptId) return attemptId;
@@ -82,30 +102,38 @@ export function QuizPlayer({ quiz, questions }: Props) {
 
   if (!current) {
     return (
-      <div className="rounded-xl bg-surface-container-lowest p-space-xl text-center shadow-sm">
+      <div className="rounded-xl bg-surface-container-lowest p-10 text-center shadow-sm">
         <p className="text-sm text-on-surface-variant">Đề này chưa có câu hỏi.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-space-lg">
-      <div className="rounded-xl bg-surface-container-lowest p-space-md shadow-sm">
-        <div className="flex flex-col justify-between gap-space-md pb-space-sm lg:flex-row lg:items-center">
-          <div className="flex items-center gap-space-md">
+    <div className="flex flex-col gap-5">
+      {/* Header card */}
+      <div className="rounded-xl bg-surface-container-lowest p-4 shadow-sm">
+        <div className="flex flex-col justify-between gap-4 pb-3 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Icon name="school" className="text-[24px]" />
             </div>
             <div>
-              <span className="rounded bg-primary-fixed px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-on-primary-fixed">
-                Phòng thi
-              </span>
+              {retryMode && (
+                <span className="mb-1 inline-block rounded bg-tertiary/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+                  Luyện lại câu sai
+                </span>
+              )}
+              {!retryMode && (
+                <span className="mb-1 inline-block rounded bg-primary-fixed px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-on-primary-fixed">
+                  Phòng thi
+                </span>
+              )}
               <h1 className="font-headline text-base font-bold tracking-tight">
                 {quiz.title}
               </h1>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-space-sm">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => toggleFlag(current.id)}
@@ -125,11 +153,11 @@ export function QuizPlayer({ quiz, questions }: Props) {
             </button>
           </div>
         </div>
-        <div className="pt-space-sm">
+        <div className="pt-2">
           <div className="mb-1.5 flex items-center justify-between text-xs">
             <span className="text-on-surface-variant">Tiến độ</span>
             <span className="font-mono font-semibold text-secondary">
-              Đã làm {answeredCount}/{questions.length} ({progress}%)
+              Đã làm {answeredCount}/{activeQuestions.length} ({progress}%)
             </span>
           </div>
           <div className="h-2.5 overflow-hidden rounded-full bg-surface-container-highest">
@@ -142,19 +170,20 @@ export function QuizPlayer({ quiz, questions }: Props) {
       </div>
 
       {error ? (
-        <p className="rounded-lg bg-error-container px-space-md py-2 text-sm text-on-error-container">
+        <p className="rounded-lg bg-error-container px-4 py-2 text-sm text-on-error-container">
           {error}
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 items-start gap-space-lg lg:grid-cols-12">
-        <section className="rounded-xl bg-surface-container-lowest p-space-xl shadow-sm lg:col-span-8">
-          <div className="mb-space-lg flex flex-wrap items-center gap-space-xs">
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12">
+        {/* Question panel */}
+        <section className="rounded-xl bg-surface-container-lowest p-5 shadow-sm lg:col-span-8 sm:p-8">
+          <div className="mb-5 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-primary-container px-3 py-1 text-lg font-bold text-on-primary shadow-sm">
               Câu {index + 1}
             </span>
             <span className="text-sm text-on-surface-variant">
-              / {questions.length} câu
+              / {activeQuestions.length} câu
             </span>
             {current.difficulty ? (
               <span className="ml-2 rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-semibold text-on-secondary-container">
@@ -163,11 +192,11 @@ export function QuizPlayer({ quiz, questions }: Props) {
             ) : null}
           </div>
 
-          <p className="mb-space-xl font-headline text-lg font-semibold leading-relaxed text-on-surface">
+          <p className="mb-6 font-headline text-lg font-semibold leading-relaxed text-on-surface">
             {current.question_text}
           </p>
 
-          <div className="flex flex-col gap-space-sm">
+          <div className="flex flex-col gap-3">
             {current.options.map((opt, i) => {
               const selected = answers[current.id] === opt.id;
               const key = opt.option_key || optionKeys[i] || String(i + 1);
@@ -178,7 +207,7 @@ export function QuizPlayer({ quiz, questions }: Props) {
                   onClick={() =>
                     setAnswers((prev) => ({ ...prev, [current.id]: opt.id }))
                   }
-                  className={`group flex items-start gap-space-md rounded-xl p-space-md text-left shadow-sm transition ${
+                  className={`group flex items-start gap-4 rounded-xl p-4 text-left shadow-sm transition ${
                     selected
                       ? "bg-surface-container-low ring-1 ring-primary/30"
                       : "bg-surface-container-lowest hover:bg-surface-container-low"
@@ -210,23 +239,23 @@ export function QuizPlayer({ quiz, questions }: Props) {
             })}
           </div>
 
-          <div className="mt-space-xl flex items-center justify-between rounded-b-xl bg-surface-container-low -mx-space-xl -mb-space-xl px-space-xl py-space-md">
+          <div className="mt-6 flex items-center justify-between rounded-b-xl bg-surface-container-low -mx-5 -mb-5 px-5 py-4 sm:-mx-8 sm:-mb-8 sm:px-8">
             <button
               type="button"
               disabled={index === 0}
               onClick={() => setIndex((i) => Math.max(0, i - 1))}
-              className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-space-md py-2.5 text-sm font-semibold shadow-sm disabled:opacity-40"
+              className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-4 py-2.5 text-sm font-semibold shadow-sm disabled:opacity-40"
             >
               <Icon name="arrow_back" className="text-[20px]" />
               Câu trước
             </button>
             <button
               type="button"
-              disabled={index >= questions.length - 1}
+              disabled={index >= activeQuestions.length - 1}
               onClick={() =>
-                setIndex((i) => Math.min(questions.length - 1, i + 1))
+                setIndex((i) => Math.min(activeQuestions.length - 1, i + 1))
               }
-              className="flex items-center gap-2 rounded-lg bg-primary px-space-lg py-2.5 text-sm font-semibold text-on-primary shadow-md disabled:opacity-40"
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary shadow-md disabled:opacity-40"
             >
               Câu tiếp
               <Icon name="arrow_forward" className="text-[20px]" />
@@ -234,18 +263,19 @@ export function QuizPlayer({ quiz, questions }: Props) {
           </div>
         </section>
 
-        <aside className="rounded-xl bg-surface-container-lowest p-space-md shadow-sm lg:col-span-4">
-          <div className="mb-space-md flex items-center justify-between">
-            <div className="flex items-center gap-space-xs">
+        {/* Question grid sidebar */}
+        <aside className="rounded-xl bg-surface-container-lowest p-4 shadow-sm lg:col-span-4">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <Icon name="grid_view" className="text-[20px] text-primary" />
               <h3 className="text-sm font-bold">Danh sách câu hỏi</h3>
             </div>
             <span className="rounded-md bg-surface-container px-2 py-0.5 font-mono text-xs">
-              {questions.length} câu
+              {activeQuestions.length} câu
             </span>
           </div>
           <div className="grid grid-cols-5 gap-2">
-            {questions.map((q, i) => {
+            {activeQuestions.map((q, i) => {
               const answered = Boolean(answers[q.id]);
               const active = i === index;
               const isFlagged = flagged.has(q.id);
