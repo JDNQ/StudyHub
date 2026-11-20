@@ -373,6 +373,18 @@ export async function submitAttempt(params: {
     validOptionsByQuestion.set(opt.question_id, set);
   }
 
+  // Only score questions that the user actually submitted answers for.
+  // This is critical for "retry wrong answers" mode: if a 10-question quiz
+  // has 3 wrong questions retried, scoring all 10 questions would give 30%
+  // even when all 3 retried questions are correct.
+  // We score only the submitted question IDs; unanswered questions in the
+  // original quiz are recorded with selected_option_id = null, is_correct = false
+  // but are NOT counted in the denominator.
+  const submittedQuestionIds = new Set(answers.map((a) => a.questionId));
+  const isPartialAttempt =
+    submittedQuestionIds.size > 0 &&
+    submittedQuestionIds.size < questionList.length;
+
   let correctCount = 0;
 
   const rows = questionList.map((q) => {
@@ -383,7 +395,8 @@ export async function submitAttempt(params: {
       submittedId && validOptions?.has(submittedId) ? submittedId : null;
     const correctId = correctByQuestion.get(q.id) ?? null;
     const isCorrect = Boolean(selected && correctId && selected === correctId);
-    if (isCorrect) correctCount += 1;
+    // Only count towards the score if this question was submitted
+    if (isCorrect && submittedQuestionIds.has(q.id)) correctCount += 1;
     return {
       attempt_id: attemptId,
       question_id: q.id,
@@ -400,7 +413,10 @@ export async function submitAttempt(params: {
     throw new ApiError(500, "SAVE_ANSWERS_FAILED", upsertError.message);
   }
 
-  const total = questionList.length || attempt.total_questions;
+  // Denominator = number of questions actually submitted (partial retry) or all questions
+  const total = isPartialAttempt
+    ? submittedQuestionIds.size
+    : questionList.length || attempt.total_questions;
   const score = total > 0 ? Number(((correctCount / total) * 100).toFixed(2)) : 0;
   const started = new Date(attempt.started_at).getTime();
   const now = Date.now();

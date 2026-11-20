@@ -22,8 +22,28 @@ export default function PrivacyPage() {
             <p>
               Dữ liệu được dùng duy nhất để cung cấp dịch vụ StudyHub AI: tạo đề
               trắc nghiệm, lưu kết quả học tập, và cải thiện trải nghiệm người dùng.
-              Chúng tôi không bán hoặc chia sẻ dữ liệu cá nhân với bên thứ ba vì
-              mục đích thương mại.
+              Chúng tôi không bán dữ liệu cá nhân cho bên thứ ba vì mục đích thương mại.
+            </p>
+          </div>
+
+          <div>
+            <h2 className="mb-2 font-headline text-lg font-bold">2a. Chia sẻ với bên thứ ba — OpenAI</h2>
+            <p>
+              Để tạo câu hỏi trắc nghiệm, <strong>nội dung văn bản</strong> trích xuất
+              từ file PDF bạn tải lên được gửi tới{" "}
+              <strong>OpenAI</strong> (openai.com) thông qua API. Chúng tôi không gửi
+              tên tài khoản, email, hay bất kỳ thông tin định danh nào kèm theo. Việc
+              xử lý này tuân theo{" "}
+              <a
+                href="https://openai.com/policies/privacy-policy"
+                className="text-primary underline"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Chính sách bảo mật của OpenAI
+              </a>
+              . Nếu bạn không muốn nội dung tài liệu được gửi tới OpenAI, vui lòng
+              không sử dụng tính năng tạo đề thi.
             </p>
           </div>
 
