@@ -3,7 +3,7 @@ import { Be_Vietnam_Pro, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/goo
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin", "vietnamese"],
+  subsets: ["latin"],
   variable: "--font-plus-jakarta",
   weight: ["500", "600", "700", "800"],
 });

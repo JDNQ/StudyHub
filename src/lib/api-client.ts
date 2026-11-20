@@ -1,8 +1,19 @@
-import type { Difficulty, Document, Quiz, QuizAttempt } from "@/lib/types/database";
 import type {
-  PublicQuestion,
-  ResultQuestion,
-} from "@/lib/quizzes/service";
+  AnswerOption,
+  Difficulty,
+  Document,
+  Question,
+  Quiz,
+  QuizAttempt,
+} from "@/lib/types/database";
+
+export type PublicOption = Omit<AnswerOption, "is_correct">;
+export type PublicQuestion = Question & { options: PublicOption[] };
+export type ResultQuestion = Question & {
+  options: AnswerOption[];
+  selected_option_id: string | null;
+  is_correct: boolean | null;
+};
 
 export type ApiErrorBody = {
   error: { code: string; message: string; details?: unknown };

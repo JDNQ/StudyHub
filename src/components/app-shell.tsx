@@ -79,9 +79,7 @@ export function AppShell({
                 >
                   <Icon
                     name={item.icon}
-                    className={`text-[20px] transition-transform group-hover:scale-110 ${
-                      item.icon === "auto_awesome" && !active ? "text-tertiary" : ""
-                    }`}
+                    className="text-[20px] transition-transform group-hover:scale-110"
                   />
                   <span>{item.label}</span>
                 </Link>
