@@ -47,10 +47,14 @@ ${text}`;
 }
 
 async function callOnce(input: QuizGenerateInput): Promise<GeneratedQuiz> {
-  const openai = createOpenAI({ apiKey: env.openaiApiKey });
+  // FreeLLMAPI (and most free gateways) speak Chat Completions, not Responses API.
+  const openai = createOpenAI({
+    apiKey: env.openaiApiKey,
+    baseURL: env.openaiBaseUrl,
+  });
 
   const { object } = await generateObject({
-    model: openai(env.openaiModel),
+    model: openai.chat(env.openaiModel),
     schema: generatedQuizSchema,
     prompt: buildPrompt(input),
     temperature: 0.4,
@@ -59,7 +63,7 @@ async function callOnce(input: QuizGenerateInput): Promise<GeneratedQuiz> {
   return assertValidGeneratedQuiz(object, input.questionCount);
 }
 
-/** OpenAI quiz generation with one retry on invalid/failed output. */
+/** Quiz generation via OpenAI-compatible API (FreeLLMAPI by default) with one retry. */
 export async function generateQuizFromDocument(
   input: QuizGenerateInput,
 ): Promise<GeneratedQuiz> {
