@@ -19,8 +19,15 @@ export const env = {
   get openaiApiKey() {
     return required("OPENAI_API_KEY");
   },
+  /** OpenAI-compatible base URL. Defaults to local FreeLLMAPI. */
+  get openaiBaseUrl() {
+    return (
+      process.env.OPENAI_BASE_URL?.replace(/\/$/, "") ||
+      "http://localhost:3001/v1"
+    );
+  },
   get openaiModel() {
-    return process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+    return process.env.OPENAI_MODEL ?? "auto";
   },
   get quizDailyLimit() {
     const raw = process.env.QUIZ_DAILY_LIMIT;

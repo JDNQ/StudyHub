@@ -40,7 +40,7 @@ function makeOptions(questionId: string, correctKey = "A"): Row[] {
 
 function buildFixtures() {
   const questions = Array.from({ length: 10 }, (_, i) => makeQuestion(`q${i + 1}`, i));
-  const options   = questions.flatMap((q) => makeOptions(q.id, "A"));
+  const options   = questions.flatMap((q) => makeOptions(q.id as string, "A"));
   return { questions, options };
 }
 
@@ -174,9 +174,9 @@ describe("submitAttempt — real function, mocked Supabase", () => {
       await submitAttempt({ supabase: supabase as any, userId: USER_ID, attemptId: ATTEMPT_ID, answers, mode: "full" });
 
       expect(captured).not.toBeNull();
-      expect((captured as Row).correct_count).toBe(7);
-      expect((captured as Row).total_questions).toBe(10);
-      expect((captured as Row).score).toBe(70);
+      expect((captured as unknown as Row).correct_count).toBe(7);
+      expect((captured as unknown as Row).total_questions).toBe(10);
+      expect((captured as unknown as Row).score).toBe(70);
     });
 
     it("10/10 answered correctly → 100%", async () => {
