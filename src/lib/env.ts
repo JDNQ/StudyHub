@@ -23,7 +23,7 @@ export const env = {
   get openaiBaseUrl() {
     return (
       process.env.OPENAI_BASE_URL?.replace(/\/$/, "") ||
-      "http://localhost:3001/v1"
+      "http://localhost:31415/v1"
     );
   },
   get openaiModel() {
