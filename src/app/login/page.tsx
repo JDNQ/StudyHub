@@ -8,7 +8,11 @@ import { Icon } from "@/components/icon";
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const rawNext = searchParams.get("next");
+  const next =
+    rawNext && !rawNext.startsWith("/login") && !rawNext.startsWith("/auth")
+      ? rawNext
+      : "/";
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");

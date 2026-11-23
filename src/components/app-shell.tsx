@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/icon";
@@ -22,8 +22,9 @@ type SidebarProps = {
   quotaLimit: number;
   quotaPct: number;
   pathname: string;
+  navigatingTo: string | null;
   onSignOut: () => void;
-  onNavClick?: () => void;
+  onNavClick?: (href?: string) => void;
 };
 
 function isActive(pathname: string, href: string) {
@@ -38,6 +39,7 @@ function SidebarInner({
   quotaLimit,
   quotaPct,
   pathname,
+  navigatingTo,
   onSignOut,
   onNavClick,
 }: SidebarProps) {
@@ -45,7 +47,11 @@ function SidebarInner({
     <div className="flex h-full flex-col justify-between bg-surface-container-lowest shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
       <div className="flex flex-col">
         <div className="flex h-16 items-center justify-between px-4">
-          <Link href="/" className="flex items-center gap-2" onClick={onNavClick}>
+          <Link
+            href="/"
+            className="flex items-center gap-2"
+            onClick={() => onNavClick?.("/")}
+          >
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary font-headline text-sm font-bold">
               SH
             </span>
@@ -63,22 +69,28 @@ function SidebarInner({
         <nav className="mt-4 flex flex-col gap-1 px-3">
           {(NAV as readonly NavItem[]).map((item) => {
             const active = isActive(pathname, item.href);
+            const isNavigatingThis = navigatingTo === item.href;
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={onNavClick}
-                className={`group flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm transition-all duration-200 ${
+                onClick={() => onNavClick?.(item.href)}
+                className={`group flex items-center justify-between rounded-lg px-4 py-2.5 text-sm transition-all duration-200 ${
                   active
                     ? "bg-primary font-semibold text-on-primary"
                     : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
                 }`}
               >
-                <Icon
-                  name={item.icon}
-                  className="text-[20px] transition-transform group-hover:scale-110"
-                />
-                <span>{item.label}</span>
+                <div className="flex items-center gap-3">
+                  <Icon
+                    name={item.icon}
+                    className="text-[20px] transition-transform group-hover:scale-110"
+                  />
+                  <span>{item.label}</span>
+                </div>
+                {isNavigatingThis && (
+                  <span className="h-2 w-2 rounded-full bg-current animate-ping" />
+                )}
               </Link>
             );
           })}
@@ -133,6 +145,12 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    setNavigatingTo(null);
+  }, [pathname]);
+
   const quotaPct = Math.min(100, Math.round((quotaUsed / Math.max(quotaLimit, 1)) * 100));
   const name = displayName || email?.split("@")[0] || "Bạn";
 
@@ -143,6 +161,13 @@ export function AppShell({
     router.refresh();
   }
 
+  const handleNavClick = (href?: string) => {
+    if (href && href !== pathname) {
+      setNavigatingTo(href);
+    }
+    setSidebarOpen(false);
+  };
+
   const sidebarProps: SidebarProps = {
     name,
     email,
@@ -150,15 +175,23 @@ export function AppShell({
     quotaLimit,
     quotaPct,
     pathname,
+    navigatingTo,
     onSignOut: () => void signOut(),
-    onNavClick: () => setSidebarOpen(false),
+    onNavClick: handleNavClick,
   };
 
   return (
     <div className="min-h-screen bg-background font-body text-on-surface antialiased">
+      {/* Top progress bar when navigating */}
+      {navigatingTo && (
+        <div className="fixed top-0 left-0 right-0 z-[100] h-0.5 overflow-hidden bg-primary/20">
+          <div className="h-full w-full bg-primary animate-pulse" />
+        </div>
+      )}
+
       {/* Desktop sidebar — hidden on mobile */}
       <aside className="fixed left-0 top-0 z-50 hidden h-full w-64 lg:block">
-        <SidebarInner {...sidebarProps} onNavClick={undefined} />
+        <SidebarInner {...sidebarProps} onNavClick={(href) => href && href !== pathname && setNavigatingTo(href)} />
       </aside>
 
       {/* Mobile drawer overlay */}
